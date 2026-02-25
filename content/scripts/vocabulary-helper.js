@@ -370,6 +370,9 @@
     root.replaceChildren();
     const doc = root.ownerDocument;
     const payload = session.payload;
+    // Keep reader inline panel visually integrated with Zotero's popup.
+    root.style.borderTop = "none";
+    root.style.paddingTop = "0";
 
     const wordEl = doc.createElement("div");
     wordEl.className = "zvh-reader-word";
@@ -388,11 +391,17 @@
     } else if (!payload?.hasResult || !payload.sections?.length) {
       meaning.textContent = "No definition found.";
     } else {
-      const snippets = payload.sections.slice(0, 2).map((section) => {
+      const snippets = payload.sections.slice(0, 2);
+      for (let i = 0; i < snippets.length; i += 1) {
+        const section = snippets[i];
         const pos = section.partOfSpeech ? `[${section.partOfSpeech}] ` : "";
-        return `${pos}${section.definition}`;
-      });
-      meaning.textContent = snippets.join("\n"); // Use newline to separate multiple definitions, CSS will handle the display.
+        const line = doc.createElement("div");
+        line.textContent = `${pos}${section.definition}`;
+        if (i > 0) {
+          line.style.marginTop = "2px";
+        }
+        meaning.appendChild(line);
+      }
     }
     root.appendChild(meaning);
 
