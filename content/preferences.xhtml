@@ -1,0 +1,21 @@
+<vbox id="zotero-prefpane-zotero-vocabulary-helper" onload="Zotero.VocabularyHelper.hooks.onPrefsLoad(event)">
+  <groupbox>
+    <label><html:h2>Vocabulary Helper</html:h2></label>
+    <description>Configure Notion credentials for vocabulary upload.</description>
+
+    <hbox align="center" style="margin-top: 8px;">
+      <label value="Notion API Key" style="min-width: 140px;" />
+      <html:input id="zvh-notion-api-key" type="password" style="flex:1;" />
+    </hbox>
+
+    <hbox align="center" style="margin-top: 8px;">
+      <label value="Notion Database ID" style="min-width: 140px;" />
+      <html:input id="zvh-notion-database-id" type="text" style="flex:1;" />
+    </hbox>
+
+    <hbox align="center" style="margin-top: 10px;">
+      <button id="zvh-save-settings" label="Save" />
+      <label id="zvh-settings-status" value="" style="margin-left: 8px;" />
+    </hbox>
+  </groupbox>
+</vbox>
