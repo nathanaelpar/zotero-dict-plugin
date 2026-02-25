@@ -42,14 +42,6 @@ async function startup({ id, resourceURI, rootURI }) {
   }
 }
 
-async function onMainWindowLoad({ window }) {
-  Zotero.VocabularyHelper?.hooks?.onMainWindowLoad(window);
-}
-
-async function onMainWindowUnload({ window }) {
-  Zotero.VocabularyHelper?.hooks?.onMainWindowUnload(window);
-}
-
 async function shutdown(_data, reason) {
   if (reason === APP_SHUTDOWN) {
     return;

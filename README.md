@@ -5,8 +5,7 @@ Zotero plugin for auto dictionary lookup and conditional Notion upload.
 ## What it does
 
 - When a single English word is selected, plugin auto-queries the dictionary API.
-- A result popup is shown beside the selected word (and avoids covering reader annotation popup).
-- In PDF reader, the definition popup is an independent bubble shown near the selected word.
+- In PDF reader, selection popup gets an inline definition panel.
 - The popup does not auto-close by timer.
 - Closing is triggered when the text selection is cleared.
 - `Cancel Upload` is a toggle button: click once to cancel upload, click again to re-enable.
@@ -42,10 +41,6 @@ Fill in:
 
 - Notion API Key
 - Notion Database ID
-
-Optional manual trigger:
-
-- `Tools -> Vocabulary Helper: Query Selection`
 
 ## Build
 
