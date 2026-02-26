@@ -4,19 +4,26 @@ Zotero plugin for auto dictionary lookup and conditional Notion upload.
 
 ## What it does
 
-- When a single English word is selected, plugin auto-queries the dictionary API.
-- In PDF reader, selection popup gets an inline definition panel.
-- The popup does not auto-close by timer.
-- Closing is triggered when the text selection is cleared.
+- Automatically queries dictionary API when a word is selected in the PDF reader.
+- Render an inline definition panel in the selection popup.
+- Upload to Notion vocabulary database when selection is cleared.
 - `Cancel Upload` is a toggle button: click once to cancel upload, click again to re-enable.
 - Upload to Notion happens only when:
   - API returns valid result
   - user does not click `Cancel Upload`
   - selection is cleared and popup closes
 
-## Notion fields
+## Quick Start
 
-Uploaded fields match `vocabulary-helper-extension-main`:
+1. Open Zotero and go to `Tools -> Plugins -> (Settings Icon) -> Install Plugin From File...`. Select the `.xpi` package.
+2. Go to `Zotero -> Settings... -> Vocabulary Helper`. Enter your Notion API Key and Notion Database ID.
+3. Open a PDF in Zotero Reader and select a single English word.
+4. Wait for the inline definition to load.
+5. Clear the selection to trigger upload.
+
+## Notion fields required
+
+Uploaded fields:
 
 - `Word`
 - `Phonetic`
@@ -35,7 +42,7 @@ Uploaded fields match `vocabulary-helper-extension-main`:
 
 Open in Zotero:
 
-- `Edit -> Settings -> Vocabulary Helper`
+- `Zotero -> Settings... -> Vocabulary Helper`
 
 Fill in:
 
@@ -45,6 +52,12 @@ Fill in:
 ## Build
 
 ```bash
-cd /Users/stilenvoyage/Documents/zotero-llm/zotero-vocabulary-helper
+cd /[your-path-to]/zotero-vocabulary-helper
 zip -r zotero-vocabulary-helper.xpi manifest.json bootstrap.js content README.md
 ```
+
+## Requirements
+
+- Zotero >= 8.0
+
+Tested on Zotero 8.0.3.
