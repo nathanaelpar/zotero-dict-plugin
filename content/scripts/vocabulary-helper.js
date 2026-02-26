@@ -1,6 +1,16 @@
 /* eslint-disable no-undef */
 
 (function () {
+  /*
+   * Module overview
+   * - This script is the runtime core of the addon and is loaded by bootstrap.js.
+   * - It hooks into Zotero Reader selection popup events.
+   * - For each valid selected word, it creates/updates a "reader session":
+   *   1) extract sentence context and source metadata
+   *   2) query dictionary API
+   *   3) render inline definition UI inside the popup
+   *   4) when selection disappears, finalize session and optionally upload to Notion
+   */
   const ADDON_ID = "zotero-vocabulary-helper@stilenvoyage.com";
   const PREF_BRANCH = "extensions.zoteroVocabularyHelper.";
   const PREF_NOTION_API_KEY = `${PREF_BRANCH}notionApiKey`;
@@ -11,8 +21,11 @@
 
   const STYLE_ID = "zvh-popup-style";
 
+  // Cache Notion database schema by database ID to avoid repeated schema fetches.
   const notionSchemaCache = new Map();
+  // Keep one active session per Reader instance. WeakMap prevents memory leaks.
   const readerSessionByInstance = new WeakMap();
+  // Track all open sessions so we can close them during shutdown.
   const activeReaderSessions = new Set();
 
   function registerPrefsPane() {
@@ -45,10 +58,12 @@
       const save = () => {
         Services.prefs.setStringPref(PREF_NOTION_API_KEY, apiInput.value.trim());
         Services.prefs.setStringPref(PREF_NOTION_DATABASE_ID, dbInput.value.trim());
+        // Settings changed, so cached schema may be stale for the new database.
         notionSchemaCache.clear();
         status.textContent = "Saved";
       };
 
+      // Different UI layers may dispatch either "command" or "click".
       saveBtn.addEventListener("command", save);
       saveBtn.addEventListener("click", save);
     } catch (err) {
@@ -107,6 +122,7 @@
     const sentence = resolveSelectionSentence(reader, selectedText);
 
     const source = getSourceMeta(reader);
+    // Session identity: same word in same source should reuse one lookup/upload lifecycle.
     const key = `${word.toLowerCase()}::${source.url || ""}`;
 
     let session = readerSessionByInstance.get(reader);
@@ -116,6 +132,7 @@
     }
 
     if (!session) {
+      // A session owns async lookup state, UI mount state, and upload decision flags.
       session = {
         key,
         reader,
@@ -133,6 +150,7 @@
       };
       readerSessionByInstance.set(reader, session);
       activeReaderSessions.add(session);
+      // Start lifecycle monitor and dictionary query in parallel.
       startReaderSessionMonitor(session);
       queryReaderSession(session);
     }
@@ -316,6 +334,7 @@
     }
     activeReaderSessions.delete(session);
 
+    // Upload only after session closes, and only when user did not cancel and lookup succeeded.
     if (!skipUpload && !session.canceled && session.payload?.hasResult) {
       uploadToNotion(session.payload).catch((err) => {
         logDebug("reader inline upload failed", err);
@@ -335,6 +354,7 @@
       return;
     }
 
+    // Clearing the selection closes the popup, which finalizes the session.
     const tick = () => {
       if (session.closed) {
         return;
@@ -344,8 +364,10 @@
         return;
       }
       try {
+        // requestAnimationFrame is cheap and naturally throttled by the browser.
         session.monitorId = win.requestAnimationFrame(tick);
       } catch (_) {
+        // Fallback for environments where requestAnimationFrame is unavailable.
         session.monitorId = win.setTimeout(tick, 120);
       }
     };
@@ -360,6 +382,7 @@
   function resolveSelectionSentence(reader, selectedText) {
     const probe = normalizeWord(selectedText) || (selectedText || "").trim();
 
+    // Prefer real sentence context from PDF chars; fallback to a safe word-like value.
     const readerSentence = extractSentenceFromReaderChars(reader, selectedText);
     if (readerSentence) {
       return readerSentence;
@@ -368,6 +391,7 @@
   }
 
   function extractSentenceFromReaderChars(reader, selectedText) {
+    // Locate the selected text's page and raw PDF chars, then expand to sentence boundaries.
     try {
       const selection = getActiveReaderSelectionRange(reader, selectedText);
       if (!selection || selection.collapsed) {
@@ -384,6 +408,7 @@
         return "";
       }
 
+      // Selection offsets are based on raw PDF chars, so we build a logical text view first.
       const logical = buildReaderLogicalText(chars);
       if (!logical) {
         return "";
@@ -394,6 +419,7 @@
       const logicalStart = logical.charToText[startOffset] ?? 0;
       const logicalEnd = logical.charToText[endOffset] ?? logical.text.length;
       const probe = normalizeInlineText(selectedText);
+      // Expand the selected span to sentence boundaries.
       const sentence = sliceSentenceByOffsets(logical.text, logicalStart, logicalEnd, probe);
       return sentence;
     } catch (_) {
@@ -402,6 +428,7 @@
   }
 
   function getActiveReaderSelectionRange(reader, selectedText = "") {
+    // These are Zotero internal/private fields; guard every access because shape may change.
     const ranges = reader?._internalReader?._primaryView?._selectionRanges;
     if (!Array.isArray(ranges) || !ranges.length) {
       return null;
@@ -450,11 +477,13 @@
     const charToText = new Array(chars.length + 1).fill(0);
     let text = "";
 
+    // Build "user-visible" text and a mapping from raw char index -> logical text offset.
     for (let i = 0; i < chars.length; i += 1) {
       const ch = chars[i] || {};
       charToText[i] = text.length;
       if (!ch.ignorable) {
         text += typeof ch.c === "string" ? ch.c : "";
+        // Seperation properties are recorded on char before the break.
         if (ch.spaceAfter || ch.lineBreakAfter || ch.paragraphBreakAfter) {
           text += " ";
         }
@@ -487,6 +516,7 @@
     const end = clampOffset(logicalEnd, raw.length);
     const pivot = Math.min(start, end);
     const searchFrom = Math.max(pivot, end);
+    // Support both English and Chinese sentence punctuation.
     const marks = [".", "!", "?", "。", "！", "？"];
 
     let sentenceStart = 0;
@@ -526,6 +556,8 @@
   }
 
   function normalizeWord(text) {
+    // Keep only plain English-like tokens (letters plus apostrophe/hyphen).
+    // This avoids sending long phrases/noisy selections to dictionary API.
     const cleaned = (text || "").trim().replace(/[“”"'`]/g, "");
     if (!cleaned || cleaned.length > 64) {
       return null;
@@ -567,6 +599,7 @@
     return { title, url };
   }
 
+  // If item is attachment, prefer parent item's bibliographic metadata.
   function resolveItemSourceMeta(item) {
     if (!item) {
       return { title: "", url: null };
@@ -639,6 +672,7 @@
             example,
           });
 
+          // Build Notion rich_text blocks once so upload payload can reuse them directly.
           richTexts.push({
             type: "text",
             text: { content: `${partOfSpeech}\n` },
@@ -746,6 +780,7 @@
       return;
     }
 
+    // Adapt payload to actual database schema when possible, fallback to default field names.
     const properties = await resolveNotionProperties(notionConfig, entry);
     const payload = { parent: { database_id: notionConfig.databaseId }, properties };
 
@@ -789,6 +824,7 @@
       const schema = await fetchNotionDatabaseSchema(notionConfig.apiKey, notionConfig.databaseId);
       return buildPropertiesFromSchema(schema, entry);
     } catch (err) {
+      // Schema fetch can fail due to permissions/network; fallback keeps upload functional.
       logDebug("failed to fetch notion schema, fallback to default payload", err);
       return buildFallbackProperties(entry);
     }
@@ -810,6 +846,7 @@
 
     const json = await response.json();
     const props = json?.properties || {};
+    // Cache schema for this run to reduce Notion API calls.
     notionSchemaCache.set(dbId, props);
     return props;
   }
@@ -824,6 +861,7 @@
       };
     }
 
+    // Try common alias names so this addon works with slightly different database templates.
     maybeSetRichText(schema, props, ["Word", "Vocabulary", "Selected Word"], entry.word || "");
     maybeSetRichText(schema, props, ["Phonetic"], entry.phonetic ? `/${entry.phonetic}/` : "");
     maybeSetRichTextArray(schema, props, ["Meaning"], entry.meaningRichText || []);
@@ -924,6 +962,7 @@
       return fetch(url, options);
     }
 
+    // Fallback path for environments where global fetch is unavailable.
     const method = options.method || "GET";
     const headers = options.headers || {};
     const body = options.body;
