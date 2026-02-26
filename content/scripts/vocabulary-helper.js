@@ -819,7 +819,7 @@
     maybeSetRichText(schema, props, ["Phonetic"], entry.phonetic ? `/${entry.phonetic}/` : "");
     maybeSetRichTextArray(schema, props, ["Meaning"], entry.meaningRichText || []);
     maybeSetRichText(schema, props, ["Sentence", "Context"], entry.sentence || "");
-    maybeSetSourceTitle(schema, props, entry.sourceTitle || "");
+    maybeSetRichText(schema, props, ["Source Title", "Paper Title"], entry.sourceTitle || "");
 
     maybeSetURL(schema, props, ["Source URL", "URL"], entry.sourceURL || null);
     maybeSetURL(schema, props, ["Jump Back", "JumpBack"], entry.sourceURL || null);
@@ -836,7 +836,7 @@
   function buildFallbackProperties(entry) {
     return {
       Word: {
-        title: [{ text: { content: entry.word || entry.sourceTitle || "" } }],
+        title: [{ text: { content: entry.word || "" } }],
       },
       Phonetic: {
         rich_text: [{ text: { content: entry.phonetic ? `/${entry.phonetic}/` : "" } }],
@@ -870,24 +870,6 @@
     for (const name of names) {
       if (schema[name]?.type === "rich_text") {
         props[name] = { rich_text: [{ text: { content } }] };
-        return;
-      }
-    }
-  }
-
-  function maybeSetSourceTitle(schema, props, content) {
-    if (!content) {
-      return;
-    }
-
-    for (const name of ["Source Title", "Paper Title"]) {
-      const propType = schema[name]?.type;
-      if (propType === "rich_text") {
-        props[name] = { rich_text: [{ text: { content } }] };
-        return;
-      }
-      if (propType === "title") {
-        props[name] = { title: [{ text: { content } }] };
         return;
       }
     }
