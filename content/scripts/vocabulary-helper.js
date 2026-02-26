@@ -338,18 +338,47 @@
   }
 
   function captureReaderSelectionSnapshot(reader, selectedText = "") {
-    const range = getActiveReaderSelectionRange(reader, selectedText);
-    if (!range || range.collapsed) {
+    // These are Zotero internal/private fields; guard every access because shape may change.
+    // expected ranges: [{ pageIndex, anchorOffset, headOffset, text }, ...]
+    const ranges = reader?._internalReader?._primaryView?._selectionRanges;
+    if (!Array.isArray(ranges) || !ranges.length) {
+      return null;
+    }
+
+    // Filter out collapsed/empty ranges
+    const active = ranges.filter((range) => range && !range.collapsed); 
+    if (!active.length) {
+      return null;
+    }
+
+    // Look for the range that range.text best matches the selected text
+    const fallbackText = normalizeInlineText(selectedText);
+    const probe = fallbackText.toLowerCase();
+    const exactMatch = probe
+      ? active.find((candidate) => normalizeInlineText(candidate.text).toLowerCase() === probe) || null
+      : null;
+    const fuzzyMatch =
+      !exactMatch && probe
+        ? active.find((candidate) => {
+            const text = normalizeInlineText(candidate.text).toLowerCase();
+            return text && (text.includes(probe) || probe.includes(text));
+          }) || null
+        : null;
+    // exactMatch > fuzzyMatch > any range with anchor/head > first range
+    const range = exactMatch || fuzzyMatch || active.find((candidate) => candidate.anchor || candidate.head) || active[0];
+    if (!range) {
       return null;
     }
 
     const pageIndex = Number(range.pageIndex);
-    if (!Number.isInteger(pageIndex) || pageIndex < 0) {
-      return null;
-    }
     const anchorOffset = Number(range.anchorOffset);
     const headOffset = Number(range.headOffset);
-    if (!Number.isFinite(anchorOffset) || !Number.isFinite(headOffset)) {
+    if (
+      !Number.isInteger(pageIndex) ||
+      pageIndex < 0 ||
+      !Number.isFinite(anchorOffset) ||
+      !Number.isFinite(headOffset)
+    ) {
       return null;
     }
 
@@ -357,40 +386,8 @@
       pageIndex,
       anchorOffset,
       headOffset,
-      text: normalizeInlineText(range.text || selectedText),
+      text: normalizeInlineText(range.text || fallbackText),
     };
-  }
-
-  function getActiveReaderSelectionRange(reader, selectedText = "") {
-    // These are Zotero internal/private fields; guard every access because shape may change.
-    const ranges = reader?._internalReader?._primaryView?._selectionRanges;
-    if (!Array.isArray(ranges) || !ranges.length) {
-      return null;
-    }
-
-    const active = ranges.filter((range) => range && !range.collapsed);
-    if (!active.length) {
-      return null;
-    }
-
-    const probe = normalizeInlineText(selectedText).toLowerCase();
-    if (probe) {
-      const exact = active.find((range) => normalizeInlineText(range.text).toLowerCase() === probe);
-      if (exact) {
-        return exact;
-      }
-
-      const fuzzy = active.find((range) => {
-        const text = normalizeInlineText(range.text).toLowerCase();
-        return text && (text.includes(probe) || probe.includes(text));
-      });
-      if (fuzzy) {
-        return fuzzy;
-      }
-    }
-
-    const marked = active.find((range) => range.anchor || range.head);
-    return marked || active[0];
   }
 
   function finalizeReaderSession(session, options = {}) {
