@@ -740,35 +740,18 @@
   }
 
   async function uploadToNotion(entry) {
-    const notionApiKey = getStringPref(PREF_NOTION_API_KEY, "").trim();
-    const notionDatabaseId = getStringPref(PREF_NOTION_DATABASE_ID, "").trim();
-
-    if (!notionApiKey || !notionDatabaseId) {
+    const notionConfig = getNotionConfig();
+    if (!notionConfig) {
       logDebug("skip upload: notion config missing");
       return;
     }
 
-    let schema = null;
-    try {
-      schema = await fetchNotionDatabaseSchema(notionApiKey, notionDatabaseId);
-    } catch (err) {
-      logDebug("failed to fetch notion schema, fallback to default payload", err);
-    }
-
-    const payload = {
-      parent: { database_id: notionDatabaseId },
-      properties: schema
-        ? buildPropertiesFromSchema(schema, entry)
-        : buildFallbackProperties(entry),
-    };
+    const properties = await resolveNotionProperties(notionConfig, entry);
+    const payload = { parent: { database_id: notionConfig.databaseId }, properties };
 
     const response = await doRequest("https://api.notion.com/v1/pages", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${notionApiKey}`,
-        "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28",
-      },
+      headers: buildNotionHeaders(notionConfig.apiKey, true),
       body: JSON.stringify(payload),
     });
 
@@ -781,18 +764,44 @@
     logDebug(`uploaded to notion: ${entry.word}`);
   }
 
+  function getNotionConfig() {
+    const apiKey = getStringPref(PREF_NOTION_API_KEY, "").trim();
+    const databaseId = getStringPref(PREF_NOTION_DATABASE_ID, "").trim();
+    if (!apiKey || !databaseId) {
+      return null;
+    }
+    return { apiKey, databaseId };
+  }
+
+  function buildNotionHeaders(apiKey, withJSON = false) {
+    const headers = {
+      Authorization: `Bearer ${apiKey}`,
+      "Notion-Version": "2022-06-28",
+    };
+    if (withJSON) {
+      headers["Content-Type"] = "application/json";
+    }
+    return headers;
+  }
+
+  async function resolveNotionProperties(notionConfig, entry) {
+    try {
+      const schema = await fetchNotionDatabaseSchema(notionConfig.apiKey, notionConfig.databaseId);
+      return buildPropertiesFromSchema(schema, entry);
+    } catch (err) {
+      logDebug("failed to fetch notion schema, fallback to default payload", err);
+      return buildFallbackProperties(entry);
+    }
+  }
+
   async function fetchNotionDatabaseSchema(apiKey, dbId) {
-    const cacheKey = `${dbId}`;
-    if (notionSchemaCache.has(cacheKey)) {
-      return notionSchemaCache.get(cacheKey);
+    if (notionSchemaCache.has(dbId)) {
+      return notionSchemaCache.get(dbId);
     }
 
     const response = await doRequest(`https://api.notion.com/v1/databases/${dbId}`, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Notion-Version": "2022-06-28",
-      },
+      headers: buildNotionHeaders(apiKey),
     });
 
     if (!response.ok) {
@@ -801,7 +810,7 @@
 
     const json = await response.json();
     const props = json?.properties || {};
-    notionSchemaCache.set(cacheKey, props);
+    notionSchemaCache.set(dbId, props);
     return props;
   }
 
@@ -811,7 +820,7 @@
     const titleName = Object.keys(schema).find((name) => schema[name]?.type === "title");
     if (titleName) {
       props[titleName] = {
-        title: [{ text: { content: resolveTitleValue(entry) } }],
+        title: [{ text: { content: entry.word || "" } }],
       };
     }
 
@@ -827,10 +836,6 @@
     maybeSetDate(schema, props, ["Time", "Date"], new Date().toISOString());
 
     return props;
-  }
-
-  function resolveTitleValue(entry) {
-    return entry.word || "";
   }
 
   function buildFallbackProperties(entry) {
