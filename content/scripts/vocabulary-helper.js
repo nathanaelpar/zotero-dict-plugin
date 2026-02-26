@@ -6,10 +6,10 @@
    * - This script is the runtime core of the addon and is loaded by bootstrap.js.
    * - It hooks into Zotero Reader selection popup events.
    * - For each valid selected word, it creates/updates a "reader session":
-   *   1) extract sentence context and source metadata
+   *   1) capture selection range snapshot (page + offsets)
    *   2) query dictionary API
    *   3) render inline definition UI inside the popup
-   *   4) when selection disappears, finalize session and optionally upload to Notion
+   *   4) when selection disappears, finalize session and resolve context/meta before upload
    */
   const ADDON_ID = "zotero-vocabulary-helper@stilenvoyage.com";
   const PREF_BRANCH = "extensions.zoteroVocabularyHelper.";
@@ -102,6 +102,9 @@
     );
   }
 
+  /* 
+   * Main handler for reader selection popup event
+   */
   async function handleReaderSelection(event) {
     const selectedText = (event?.params?.annotation?.text || "").trim();
     if (!selectedText) {
@@ -119,11 +122,10 @@
     }
     injectStyle(event.doc);
 
-    const sentence = resolveSelectionSentence(reader, selectedText);
-
-    const source = getSourceMeta(reader);
-    // Session identity: same word in same source should reuse one lookup/upload lifecycle.
-    const key = `${word.toLowerCase()}::${source.url || ""}`;
+    const selectionSnapshot = captureReaderSelectionSnapshot(reader, selectedText);
+    // Session identity: same word in same reader item should reuse one lookup/upload lifecycle.
+    const readerItemKey = reader?.itemID ? String(reader.itemID) : "";
+    const key = `${word.toLowerCase()}::${readerItemKey}`;
 
     let session = readerSessionByInstance.get(reader);
     if (session && session.key !== key) {
@@ -138,9 +140,7 @@
         reader,
         doc: event.doc,
         word,
-        sourceTitle: source.title,
-        sourceURL: source.url,
-        sentence,
+        selectionSnapshot: selectionSnapshot || null,
         canceled: false,
         closed: false,
         loading: true,
@@ -160,42 +160,6 @@
     event.append(root);
     session.mountEl = root;
     renderReaderSessionMount(session);
-  }
-
-  function getReaderSelectionPopup(reader, selectedText = "") {
-    // Try to find the selection popup that best matches the current selected text.
-    try {
-      const state = reader?._state;
-      if (!state) {
-        return null;
-      }
-      const candidates = [
-        state.primaryViewSelectionPopup || null,
-        state.secondaryViewSelectionPopup || null,
-      ].filter(Boolean);
-      if (!candidates.length) {
-        return null;
-      }
-
-      const probe = (selectedText || "").trim().toLowerCase();
-      if (probe) {
-        const exact = candidates.find((popup) =>
-          (popup?.annotation?.text || "").trim().toLowerCase() === probe
-        );
-        if (exact) {
-          return exact;
-        }
-        const fuzzy = candidates.find((popup) =>
-          (popup?.annotation?.text || "").trim().toLowerCase().includes(probe)
-        );
-        if (fuzzy) {
-          return fuzzy;
-        }
-      }
-      return candidates[0] || null;
-    } catch (_) {
-      return null;
-    }
   }
 
   function renderReaderSessionMount(session) {
@@ -273,9 +237,6 @@
       session.loading = false;
       session.payload = {
         word: session.word,
-        sourceTitle: session.sourceTitle,
-        sourceURL: session.sourceURL,
-        sentence: session.sentence,
         hasResult: definition.hasResult,
         phonetic: definition.phonetic,
         meaningRichText: definition.meaningRichText,
@@ -288,63 +249,6 @@
         logDebug("queryReaderSession failed", err);
         renderReaderSessionMount(session);
       }
-    }
-  }
-
-  function isReaderSessionAlive(session) {
-    const popup = getReaderSelectionPopup(session.reader, session.word);
-    if (!popup) {
-      return false;
-    }
-
-    const selectedWord = session.word.toLowerCase();
-    const liveRaw = (popup?.annotation?.text || "").trim().toLowerCase();
-    if (!liveRaw) {
-      return false;
-    }
-    const liveWord = (normalizeWord(liveRaw) || "").toLowerCase();
-    if (liveWord) {
-      return liveWord === selectedWord;
-    }
-    return liveRaw.includes(selectedWord);
-  }
-
-  function finalizeReaderSession(session, options = {}) {
-    if (!session || session.closed) {
-      return;
-    }
-    session.closed = true;
-    const skipUpload = !!options.skipUpload;
-
-    const win = session.doc?.defaultView;
-    if (session.monitorId && win) {
-      try {
-        win.cancelAnimationFrame(session.monitorId);
-      } catch (_) {
-        try {
-          win.clearTimeout(session.monitorId);
-        } catch (_) {}
-      }
-      session.monitorId = 0;
-    }
-
-    const active = readerSessionByInstance.get(session.reader);
-    if (active === session) {
-      readerSessionByInstance.delete(session.reader);
-    }
-    activeReaderSessions.delete(session);
-
-    // Upload only after session closes, and only when user did not cancel and lookup succeeded.
-    if (!skipUpload && !session.canceled && session.payload?.hasResult) {
-      uploadToNotion(session.payload).catch((err) => {
-        logDebug("reader inline upload failed", err);
-      });
-    }
-  }
-
-  function closeAllReaderSessions(options = {}) {
-    for (const session of Array.from(activeReaderSessions)) {
-      finalizeReaderSession(session, options);
     }
   }
 
@@ -379,52 +283,82 @@
     }
   }
 
-  function resolveSelectionSentence(reader, selectedText) {
-    const probe = normalizeWord(selectedText) || (selectedText || "").trim();
-
-    // Prefer real sentence context from PDF chars; fallback to a safe word-like value.
-    const readerSentence = extractSentenceFromReaderChars(reader, selectedText);
-    if (readerSentence) {
-      return readerSentence;
+  function isReaderSessionAlive(session) {
+    const popup = getReaderSelectionPopup(session.reader, session.word);
+    if (!popup) {
+      return false;
     }
-    return resolveFallbackWord(selectedText, probe);
+
+    const selectedWord = session.word.toLowerCase();
+    const liveRaw = (popup?.annotation?.text || "").trim().toLowerCase();
+    if (!liveRaw) {
+      return false;
+    }
+    const liveWord = (normalizeWord(liveRaw) || "").toLowerCase();
+    if (liveWord) {
+      return liveWord === selectedWord;
+    }
+    return liveRaw.includes(selectedWord);
   }
 
-  function extractSentenceFromReaderChars(reader, selectedText) {
-    // Locate the selected text's page and raw PDF chars, then expand to sentence boundaries.
+  function getReaderSelectionPopup(reader, selectedText = "") {
+    // Try to find the selection popup that best matches the current selected text.
     try {
-      const selection = getActiveReaderSelectionRange(reader, selectedText);
-      if (!selection || selection.collapsed) {
-        return "";
+      const state = reader?._state;
+      if (!state) {
+        return null;
+      }
+      const candidates = [
+        state.primaryViewSelectionPopup || null,
+        state.secondaryViewSelectionPopup || null,
+      ].filter(Boolean);
+      if (!candidates.length) {
+        return null;
       }
 
-      const pageIndex = Number(selection.pageIndex);
-      if (!Number.isInteger(pageIndex) || pageIndex < 0) {
-        return "";
+      const probe = (selectedText || "").trim().toLowerCase();
+      if (probe) {
+        const exact = candidates.find((popup) =>
+          (popup?.annotation?.text || "").trim().toLowerCase() === probe
+        );
+        if (exact) {
+          return exact;
+        }
+        const fuzzy = candidates.find((popup) =>
+          (popup?.annotation?.text || "").trim().toLowerCase().includes(probe)
+        );
+        if (fuzzy) {
+          return fuzzy;
+        }
       }
-
-      const chars = getReaderPageChars(reader, pageIndex);
-      if (!chars?.length) {
-        return "";
-      }
-
-      // Selection offsets are based on raw PDF chars, so we build a logical text view first.
-      const logical = buildReaderLogicalText(chars);
-      if (!logical) {
-        return "";
-      }
-
-      const startOffset = clampOffset(Math.min(selection.anchorOffset, selection.headOffset), chars.length);
-      const endOffset = clampOffset(Math.max(selection.anchorOffset, selection.headOffset), chars.length);
-      const logicalStart = logical.charToText[startOffset] ?? 0;
-      const logicalEnd = logical.charToText[endOffset] ?? logical.text.length;
-      const probe = normalizeInlineText(selectedText);
-      // Expand the selected span to sentence boundaries.
-      const sentence = sliceSentenceByOffsets(logical.text, logicalStart, logicalEnd, probe);
-      return sentence;
+      return candidates[0] || null;
     } catch (_) {
-      return "";
+      return null;
     }
+  }
+
+  function captureReaderSelectionSnapshot(reader, selectedText = "") {
+    const range = getActiveReaderSelectionRange(reader, selectedText);
+    if (!range || range.collapsed) {
+      return null;
+    }
+
+    const pageIndex = Number(range.pageIndex);
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+      return null;
+    }
+    const anchorOffset = Number(range.anchorOffset);
+    const headOffset = Number(range.headOffset);
+    if (!Number.isFinite(anchorOffset) || !Number.isFinite(headOffset)) {
+      return null;
+    }
+
+    return {
+      pageIndex,
+      anchorOffset,
+      headOffset,
+      text: normalizeInlineText(range.text || selectedText),
+    };
   }
 
   function getActiveReaderSelectionRange(reader, selectedText = "") {
@@ -457,6 +391,98 @@
 
     const marked = active.find((range) => range.anchor || range.head);
     return marked || active[0];
+  }
+
+  function finalizeReaderSession(session, options = {}) {
+    if (!session || session.closed) {
+      return;
+    }
+    session.closed = true;
+    const skipUpload = !!options.skipUpload;
+
+    const win = session.doc?.defaultView;
+    if (session.monitorId && win) {
+      try {
+        win.cancelAnimationFrame(session.monitorId);
+      } catch (_) {
+        try {
+          win.clearTimeout(session.monitorId);
+        } catch (_) {}
+      }
+      session.monitorId = 0;
+    }
+
+    const active = readerSessionByInstance.get(session.reader);
+    if (active === session) {
+      readerSessionByInstance.delete(session.reader);
+    }
+    activeReaderSessions.delete(session);
+
+    // Upload only after session closes, and only when user did not cancel and lookup succeeded.
+    if (!skipUpload && !session.canceled && session.payload?.hasResult) {
+      const uploadPayload = buildSessionUploadPayload(session);
+      uploadToNotion(uploadPayload).catch((err) => {
+        logDebug("reader inline upload failed", err);
+      });
+    }
+  }
+
+  function closeAllReaderSessions(options = {}) {
+    for (const session of Array.from(activeReaderSessions)) {
+      finalizeReaderSession(session, options);
+    }
+  }
+
+  function buildSessionUploadPayload(session) {
+    const base = session?.payload || {};
+    const fallbackWord = session?.word || "";
+    const sentence = extractSentenceFromReaderChars(session.reader, session.selectionSnapshot) || fallbackWord;
+    const source = getSourceMeta(session?.reader);
+
+    return {
+      ...base,
+      word: base.word || session?.word || "",
+      sentence,
+      sourceTitle: source.title || "",
+      sourceURL: source.url || null,
+    };
+  }
+
+  function extractSentenceFromReaderChars(reader, selectionSnapshot = null) {
+    // Locate the selected text's page and raw PDF chars, then expand to sentence boundaries.
+    try {
+      const selection = selectionSnapshot;
+      if (!selection) {
+        return "";
+      }
+
+      const pageIndex = Number(selection.pageIndex);
+      if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+        return "";
+      }
+
+      const chars = getReaderPageChars(reader, pageIndex);
+      if (!chars?.length) {
+        return "";
+      }
+
+      // Selection offsets are based on raw PDF chars, so we build a logical text view first.
+      const logical = buildReaderLogicalText(chars);
+      if (!logical) {
+        return "";
+      }
+
+      const startOffset = clampOffset(Math.min(selection.anchorOffset, selection.headOffset), chars.length);
+      const endOffset = clampOffset(Math.max(selection.anchorOffset, selection.headOffset), chars.length);
+      const logicalStart = logical.charToText[startOffset] ?? 0;
+      const logicalEnd = logical.charToText[endOffset] ?? logical.text.length;
+      const probe = normalizeInlineText(selection.text || "");
+      // Expand the selected span to sentence boundaries.
+      const sentence = sliceSentenceByOffsets(logical.text, logicalStart, logicalEnd, probe);
+      return sentence;
+    } catch (_) {
+      return "";
+    }
   }
 
   function getReaderPageChars(reader, pageIndex) {
@@ -543,16 +569,6 @@
       sentence = normalizeInlineText(probe);
     }
     return sentence;
-  }
-
-  function resolveFallbackWord(selectedText, fallback = "") {
-    const normalized = normalizeWord(selectedText);
-    if (normalized) {
-      return normalized;
-    }
-    const firstToken = (selectedText || "").trim().split(/\s+/).find(Boolean) || "";
-    const firstWord = normalizeWord(firstToken);
-    return firstWord || (fallback || "").trim();
   }
 
   function normalizeWord(text) {
