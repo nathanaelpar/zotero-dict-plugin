@@ -57,7 +57,7 @@ Fill in:
 
 ```bash
 cd /[your-path-to]/zotero-vocabulary-helper
-zip -r zotero-vocabulary-helper.xpi manifest.json bootstrap.js content README.md
+zip -r zotero-vocabulary-helper.xpi manifest.json bootstrap.js content
 ```
 
 ## Requirements
