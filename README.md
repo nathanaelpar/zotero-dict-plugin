@@ -2,6 +2,8 @@
 
 Zotero plugin for auto dictionary lookup and conditional Notion upload.
 
+![Preview](doc/PopupPreview.png)
+
 ## What it does
 
 - Automatically query dictionary API when a word is selected in the PDF reader.
