@@ -4,7 +4,7 @@ Zotero plugin for auto dictionary lookup and conditional Notion upload.
 
 ## What it does
 
-- Automatically queries dictionary API when a word is selected in the PDF reader.
+- Automatically query dictionary API when a word is selected in the PDF reader.
 - Render an inline definition panel in the selection popup.
 - Upload to Notion vocabulary database when selection is cleared.
 - `Cancel Upload` is a toggle button: click once to cancel upload, click again to re-enable.
@@ -38,6 +38,8 @@ Uploaded fields:
 `Sentence` stores the sentence/context containing the selected word.
 `Word` stores the selected word, and `Source Title` stores the Zotero item title.
 
+> Note: `Jump Back` serves for a [browser extension](https://github.com/STILatPKU/vocabulary-helper-extension). But the feature is not supported here.
+
 ## Settings
 
 Open in Zotero:
@@ -58,6 +60,6 @@ zip -r zotero-vocabulary-helper.xpi manifest.json bootstrap.js content README.md
 
 ## Requirements
 
-- Zotero >= 8.0
+- Zotero >= 8.0 (Suggested)
 
 Tested on Zotero 8.0.3.
