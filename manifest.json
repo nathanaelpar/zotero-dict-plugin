@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Zotero Vocabulary Helper",
-  "version": "0.4.5",
-  "description": "Auto query selected word and upload to Notion after closing result popup.",
+  "version": "0.5.1",
+  "description": "Shows dictionary definitions for selected words and Wikipedia summaries for selected phrases in the Zotero reader.",
   "author": "stilenvoyage",
   "homepage_url": "https://example.com/zotero-vocabulary-helper",
   "applications": {
@@ -10,7 +10,7 @@
       "id": "zotero-vocabulary-helper@stilenvoyage.com",
       "update_url": "https://example.com/zotero-vocabulary-helper/updates.json",
       "strict_min_version": "7.0",
-      "strict_max_version": "8.0.*"
+      "strict_max_version": "9.0.*"
     }
   }
 }

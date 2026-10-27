@@ -3,12 +3,9 @@
 /*
  * bootstrap.js responsibilities
  * - Integrates addon with Zotero's addon lifecycle (install/startup/shutdown).
- * - Registers chrome resources so /content files can be loaded.
  * - Creates execution context and loads the runtime module (vocabulary-helper.js).
  * - Delegates real business logic to `Zotero.VocabularyHelper.hooks`.
  */
-var chromeHandle;
-
 function install() {}
 function uninstall() {}
 
@@ -19,15 +16,6 @@ async function startup({ id, resourceURI, rootURI }) {
   if (!rootURI) {
     rootURI = resourceURI.spec;
   }
-
-  var aomStartup = Components.classes[
-    "@mozilla.org/addons/addon-manager-startup;1"
-  ].getService(Components.interfaces.amIAddonManagerStartup);
-  var manifestURI = Services.io.newURI(rootURI + "manifest.json");
-  // Register addon "content" path so files under /content are loadable by Zotero chrome URLs.
-  chromeHandle = aomStartup.registerChrome(manifestURI, [
-    ["content", "zoterovocabularyhelper", rootURI + "content/"],
-  ]);
 
   const ctx = {
     rootURI,
@@ -43,10 +31,12 @@ async function startup({ id, resourceURI, rootURI }) {
   ctx._globalThis = ctx;
 
   // Load main addon logic into the custom context above.
-  Services.scriptloader.loadSubScript(
-    `${rootURI}/content/scripts/vocabulary-helper.js`,
-    ctx
-  );
+  // Zotero's startup cache keys scripts by URL, which is the same for every version of the addon,
+  // so skip it; otherwise an update can keep running the previous version's code.
+  Services.scriptloader.loadSubScriptWithOptions(`${rootURI}content/scripts/vocabulary-helper.js`, {
+    target: ctx,
+    ignoreCache: true,
+  });
 
   if (Zotero.VocabularyHelper?.hooks?.onStartup) {
     await Zotero.VocabularyHelper.hooks.onStartup();
@@ -59,16 +49,6 @@ async function shutdown(_data, reason) {
     return;
   }
 
-  // Forward cleanup to runtime module first, then release bootstrap-level resources.
+  // Forward cleanup to runtime module.
   await Zotero.VocabularyHelper?.hooks?.onShutdown();
-
-  // Drop localized string caches so reloading addon does not keep stale bundles.
-  Cc["@mozilla.org/intl/stringbundle;1"]
-    .getService(Components.interfaces.nsIStringBundleService)
-    .flushBundles();
-
-  if (chromeHandle) {
-    chromeHandle.destruct();
-    chromeHandle = null;
-  }
 }

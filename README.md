@@ -1,57 +1,25 @@
 # Zotero Vocabulary Helper
 
-Zotero plugin for auto dictionary lookup and conditional Notion upload.
+Zotero plugin for automatic dictionary and Wikipedia lookups in the PDF reader.
 
-![Preview](doc/PopupPreview.png)
+Fork of STILatPKU/zotero-vocabulary-helper
 
 ## What it does
 
-- Automatically query dictionary API when a word is selected in the PDF reader.
-- Render an inline definition panel in the selection popup.
-- Upload to Notion vocabulary database when selection is cleared.
-- `Cancel Upload` is a toggle button: click once to cancel upload, click again to re-enable.
-- Upload to Notion happens only when:
-  - API returns valid result
-  - user does not click `Cancel Upload`
-  - selection is cleared and popup closes
+- Select a single English word in the PDF reader to see its pronunciation and definitions in the selection popup.
+- Select several words (up to 8) to see a short summary of the matching Wikipedia article.
+  - If the selection isn't an article title, the top Wikipedia search result is shown, labeled `Closest Wikipedia match`.
+  - Single words the dictionary doesn't know (often names) also fall back to Wikipedia.
+- `Read more on Wikipedia` opens the full article in your browser.
+- Popup colors follow Zotero's light and dark themes.
 
 ## Quick Start
 
 1. Open Zotero and go to `Tools -> Plugins -> (Settings Icon) -> Install Plugin From File...`. Select the `.xpi` package.
-2. Go to `Zotero -> Settings... -> Vocabulary Helper`. Enter your Notion API Key and Notion Database ID.
-3. Open a PDF in Zotero Reader and select a single English word.
-4. Wait for the inline definition to load.
-5. Clear the selection to trigger upload.
+2. Open a PDF in Zotero Reader and select a word or a short phrase.
+3. The definition or Wikipedia summary appears in the selection popup.
 
-## Notion fields required
-
-Uploaded fields:
-
-- `Word`
-- `Phonetic`
-- `Meaning`
-- `Sentence`
-- `Source Title`
-- `Source URL`
-- `Jump Back`
-- `Time`
-
-`Source URL` and `Jump Back` both use the Zotero item's `URL` field.
-`Sentence` stores the sentence/context containing the selected word.
-`Word` stores the selected word, and `Source Title` stores the Zotero item title.
-
-> Note: `Jump Back` serves for a [browser extension](https://github.com/STILatPKU/vocabulary-helper-extension). But the feature is not supported here.
-
-## Settings
-
-Open in Zotero:
-
-- `Zotero -> Settings... -> Vocabulary Helper`
-
-Fill in:
-
-- Notion API Key
-- Notion Database ID
+No settings or accounts are needed.
 
 ## Build
 
@@ -62,6 +30,4 @@ zip -r zotero-vocabulary-helper.xpi manifest.json bootstrap.js content
 
 ## Requirements
 
-- Zotero >= 8.0 (Suggested)
-
-Tested on Zotero 8.0.3.
+- Zotero 8.0 – 9.0.x (Suggested)
